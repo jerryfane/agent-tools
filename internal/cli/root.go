@@ -178,7 +178,6 @@ func newUsageSessionsCommand(root *rootOptions) *cobra.Command {
 }
 
 func newUsageTUICommand(root *rootOptions) *cobra.Command {
-	var provider string
 	cmd := &cobra.Command{
 		Use:   "tui",
 		Short: "Open the interactive usage dashboard",
@@ -187,21 +186,13 @@ func newUsageTUICommand(root *rootOptions) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if provider == "" {
-				provider = "codex"
-			}
-			if provider != "codex" {
-				return fmt.Errorf("usage tui provider %q is not implemented yet", provider)
-			}
-			if !cfg.Usage.Providers["codex"].Enabled {
-				return fmt.Errorf("codex provider is disabled")
-			}
+			// The dashboard aggregates limits across all enabled providers, so
+			// it is not scoped to a single provider.
 			program := tea.NewProgram(usagetui.New(cfg), tea.WithAltScreen(), tea.WithMouseCellMotion())
 			_, err = program.Run()
 			return err
 		},
 	}
-	cmd.Flags().StringVar(&provider, "provider", "codex", "usage provider (codex, claude)")
 	return cmd
 }
 

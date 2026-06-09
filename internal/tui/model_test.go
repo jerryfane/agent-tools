@@ -32,6 +32,40 @@ func TestModelRendersSidebarPages(t *testing.T) {
 	}
 }
 
+func TestLimitContentShowsProviderColumn(t *testing.T) {
+	model := New(config.Defaults())
+	model.updatedAt[pageLimit] = time.Now()
+	model.inFlight[pageLimit] = false
+	eighty, five := 80.0, 5.0
+	model.limits = []usage.LimitSnapshot{
+		{Provider: "codex", Profile: "crazyj", Source: "api", FiveHourRemainingPercent: &eighty},
+		{Provider: "claude", Profile: "default", Label: "claude", Source: "cache (rate-limited)", FiveHourRemainingPercent: &five},
+		{Provider: "claude", Profile: "-", Source: "error", Error: "no Claude profiles found"},
+	}
+	content := model.limitContent()
+	for _, want := range []string{"PROVIDER", "codex", "claude", "rate-limited"} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("limit content missing %q: %s", want, content)
+		}
+	}
+}
+
+func TestAlertsQualifyProviderForLimits(t *testing.T) {
+	model := New(config.Defaults())
+	five := 5.0
+	model.limits = []usage.LimitSnapshot{
+		{Provider: "claude", Profile: "crazyj", Label: "crazyj", FiveHourRemainingPercent: &five},
+		{Provider: "claude", Profile: "-", Source: "error", Error: "creds missing"},
+	}
+	content := model.alertsContent()
+	if !strings.Contains(content, "claude/crazyj low 5h quota") {
+		t.Fatalf("expected provider-qualified low-quota alert: %s", content)
+	}
+	if !strings.Contains(content, "claude/- limit error: creds missing") {
+		t.Fatalf("expected provider-qualified error alert: %s", content)
+	}
+}
+
 func TestPageNavigationDoesNotScrollNewPage(t *testing.T) {
 	model := New(config.Defaults())
 	model.viewport.SetContent(strings.Repeat("line\n", 40))

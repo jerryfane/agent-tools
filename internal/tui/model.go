@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/jerryfane/agent-tools/internal/codex"
 	"github.com/jerryfane/agent-tools/internal/config"
+	"github.com/jerryfane/agent-tools/internal/providers"
 	"github.com/jerryfane/agent-tools/internal/usage"
 )
 
@@ -276,14 +277,15 @@ func (m Model) content() string {
 func (m Model) limitContent() string {
 	if len(m.limits) == 0 && m.errors[pageLimit] == "" {
 		if _, loaded := m.updatedAt[pageLimit]; loaded || !m.inFlight[pageLimit] {
-			return "No Codex limit snapshots from the latest refresh."
+			return "No limit snapshots from the latest refresh."
 		}
-		return mutedStyle.Render("Loading Codex limits...")
+		return mutedStyle.Render("Loading limits...")
 	}
-	rows := [][]string{{"PROFILE", "5H LEFT", "WEEK LEFT", "5H RESET", "WEEK RESET", "SOURCE", "ERROR"}}
+	rows := [][]string{{"PROVIDER", "PROFILE", "5H LEFT", "WEEK LEFT", "5H RESET", "WEEK RESET", "SOURCE", "ERROR"}}
 	loc := location(m.cfg.Usage.Timezone)
 	for _, item := range m.limits {
 		rows = append(rows, []string{
+			item.Provider,
 			firstNonEmpty(item.Label, item.Profile),
 			percent(item.FiveHourRemainingPercent),
 			percent(item.WeeklyRemainingPercent),
@@ -359,14 +361,15 @@ func (m Model) providersContent() string {
 func (m Model) alertsContent() string {
 	var alerts []string
 	for _, item := range m.limits {
+		label := limitLabel(item)
 		if item.Error != "" {
-			alerts = append(alerts, fmt.Sprintf("%s limit error: %s", firstNonEmpty(item.Label, item.Profile), item.Error))
+			alerts = append(alerts, fmt.Sprintf("%s limit error: %s", label, item.Error))
 		}
 		if item.FiveHourRemainingPercent != nil && *item.FiveHourRemainingPercent <= 15 {
-			alerts = append(alerts, fmt.Sprintf("%s low 5h quota: %.0f%% left", firstNonEmpty(item.Label, item.Profile), *item.FiveHourRemainingPercent))
+			alerts = append(alerts, fmt.Sprintf("%s low 5h quota: %.0f%% left", label, *item.FiveHourRemainingPercent))
 		}
 		if item.WeeklyRemainingPercent != nil && *item.WeeklyRemainingPercent <= 15 {
-			alerts = append(alerts, fmt.Sprintf("%s low weekly quota: %.0f%% left", firstNonEmpty(item.Label, item.Profile), *item.WeeklyRemainingPercent))
+			alerts = append(alerts, fmt.Sprintf("%s low weekly quota: %.0f%% left", label, *item.WeeklyRemainingPercent))
 		}
 	}
 	for _, session := range m.sessions {
@@ -393,6 +396,16 @@ func (m Model) alertsContent() string {
 		b.WriteByte('\n')
 	}
 	return b.String()
+}
+
+// limitLabel renders a provider-qualified label for a limit snapshot, e.g.
+// "claude/default", so alerts disambiguate providers that share a profile name.
+func limitLabel(item usage.LimitSnapshot) string {
+	name := firstNonEmpty(item.Label, item.Profile)
+	if item.Provider == "" || item.Provider == name {
+		return name
+	}
+	return item.Provider + "/" + name
 }
 
 type limitsMsg struct {
@@ -427,8 +440,18 @@ func loadLimits(cfg config.Config) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), commandTimeout(cfg.Usage.RefreshLimitsSeconds, 45*time.Second))
 		defer cancel()
-		items, err := codex.NewLimitsClient(cfg).Limits(ctx, codex.LimitsOptions{})
-		return limitsMsg{items: items, err: err, at: time.Now()}
+		// Aggregate every enabled provider. A provider that fails (e.g. missing
+		// credentials) becomes a single error row so it never blanks the others.
+		var all []usage.LimitSnapshot
+		for _, name := range providers.Enabled(cfg) {
+			items, err := providers.LimitsFor(ctx, cfg, name, false)
+			if err != nil {
+				all = append(all, usage.LimitSnapshot{Provider: name, Profile: "-", Source: "error", Error: err.Error()})
+				continue
+			}
+			all = append(all, items...)
+		}
+		return limitsMsg{items: all, err: nil, at: time.Now()}
 	}
 }
 
