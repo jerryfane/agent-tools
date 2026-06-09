@@ -17,7 +17,11 @@ func TestLoadMissingConfigUsesPublicSafeDefaults(t *testing.T) {
 	if codex.CCUsageCommand != "ccusage" {
 		t.Fatalf("unexpected ccusage command: %q", codex.CCUsageCommand)
 	}
-	if cfg.Usage.Providers["claude"].Enabled {
-		t.Fatal("expected claude placeholder disabled by default")
+	claude := cfg.Usage.Providers["claude"]
+	if !claude.Enabled {
+		t.Fatal("expected claude provider enabled by default")
+	}
+	if claude.CCUsageCommand != "ccusage" {
+		t.Fatalf("unexpected claude ccusage command: %q", claude.CCUsageCommand)
 	}
 }
