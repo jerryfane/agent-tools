@@ -29,6 +29,9 @@ type ProviderConfig struct {
 	DefaultProfile string                   `koanf:"default_profile" json:"default_profile,omitempty"`
 	CCUsageEnabled bool                     `koanf:"ccusage_enabled" json:"ccusage_enabled,omitempty"`
 	CCUsageCommand string                   `koanf:"ccusage_command" json:"ccusage_command,omitempty"`
+	CacheDir       string                   `koanf:"cache_dir" json:"cache_dir,omitempty"`
+	LimitsURL      string                   `koanf:"limits_url" json:"limits_url,omitempty"`
+	TokenURL       string                   `koanf:"token_url" json:"token_url,omitempty"`
 	Profiles       map[string]ProfileConfig `koanf:"profiles" json:"profiles,omitempty"`
 }
 

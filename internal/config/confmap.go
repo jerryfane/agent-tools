@@ -17,6 +17,9 @@ func confmapProvider(cfg Config) mapProvider {
 			"default_profile": provider.DefaultProfile,
 			"ccusage_enabled": provider.CCUsageEnabled,
 			"ccusage_command": provider.CCUsageCommand,
+			"cache_dir":       provider.CacheDir,
+			"limits_url":      provider.LimitsURL,
+			"token_url":       provider.TokenURL,
 			"profiles":        map[string]interface{}{},
 		}
 	}

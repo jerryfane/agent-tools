@@ -9,6 +9,8 @@ enabled = true
 default_profile = "default"
 ccusage_enabled = true
 ccusage_command = "ccusage"
+# Optional. Defaults to the OS user cache dir under agent-tools/codex.
+# cache_dir = "~/.cache/agent-tools/codex"
 
 [usage.providers.codex.profiles.default]
 home = "~/.codex"

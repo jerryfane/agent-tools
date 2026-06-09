@@ -22,14 +22,17 @@ type ProviderSummary struct {
 }
 
 type LimitSnapshot struct {
-	Provider          string    `json:"provider"`
-	Profile           string    `json:"profile"`
-	Label             string    `json:"label"`
-	FiveHourRemaining float64   `json:"five_hour_remaining"`
-	WeeklyRemaining   float64   `json:"weekly_remaining"`
-	FiveHourResetAt   time.Time `json:"five_hour_reset_at"`
-	WeeklyResetAt     time.Time `json:"weekly_reset_at"`
-	Source            string    `json:"source"`
+	Provider                 string     `json:"provider"`
+	Profile                  string     `json:"profile"`
+	Label                    string     `json:"label,omitempty"`
+	Plan                     string     `json:"plan,omitempty"`
+	FiveHourRemainingPercent *float64   `json:"five_hour_remaining_percent,omitempty"`
+	WeeklyRemainingPercent   *float64   `json:"weekly_remaining_percent,omitempty"`
+	FiveHourResetAt          *time.Time `json:"five_hour_reset_at,omitempty"`
+	WeeklyResetAt            *time.Time `json:"weekly_reset_at,omitempty"`
+	Source                   string     `json:"source"`
+	CacheAgeSeconds          *int64     `json:"cache_age_seconds,omitempty"`
+	Error                    string     `json:"error,omitempty"`
 }
 
 type UsageSummary struct {
