@@ -213,16 +213,8 @@ func newUsageHerdrPublisherCommand(root *rootOptions) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if provider == "" {
-				provider = "codex"
-			}
-			if provider != "codex" {
-				return fmt.Errorf("usage herdr-publisher provider %q is not implemented yet", provider)
-			}
-			if !cfg.Usage.Providers["codex"].Enabled {
-				return fmt.Errorf("codex provider is disabled")
-			}
 			publisher := herdrpub.NewPublisher(cfg, herdrpub.PublisherOptions{
+				Provider:   provider,
 				Mode:       mode,
 				Interval:   interval,
 				Source:     source,
@@ -235,14 +227,14 @@ func newUsageHerdrPublisherCommand(root *rootOptions) *cobra.Command {
 			return publisher.Run(cmd.Context())
 		},
 	}
-	cmd.Flags().StringVar(&provider, "provider", "codex", "usage provider (codex, claude)")
+	cmd.Flags().StringVar(&provider, "provider", "", "limit to one usage provider (default: all enabled)")
 	cmd.Flags().StringVar(&mode, "mode", herdrpub.ModeLimit, "publisher mode: limit, usage, or auto")
 	cmd.Flags().DurationVar(&interval, "interval", 30*time.Second, "refresh interval")
 	cmd.Flags().StringVar(&source, "source", "local:agent-tools:herdr-publisher", "Herdr metadata source id")
 	cmd.Flags().StringVar(&herdrCommand, "herdr-command", "herdr", "Herdr command")
 	cmd.Flags().BoolVar(&once, "once", false, "publish once and exit")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "print metadata reports instead of calling Herdr")
-	cmd.Flags().BoolVar(&forceRefresh, "force-refresh", false, "bypass Codex limit cache once")
+	cmd.Flags().BoolVar(&forceRefresh, "force-refresh", false, "bypass the limit cache once")
 	return cmd
 }
 

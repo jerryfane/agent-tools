@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jerryfane/agent-tools/internal/codex"
 	"github.com/jerryfane/agent-tools/internal/config"
+	"github.com/jerryfane/agent-tools/internal/providers"
 	"github.com/jerryfane/agent-tools/internal/usage"
 )
 
@@ -19,7 +19,7 @@ func TestBuildReportsPublishesLimitLabels(t *testing.T) {
 	week := 69.0
 	reports := BuildReports(
 		[]Pane{{PaneID: "p1", Agent: "codex", Label: "work jerryf"}, {PaneID: "p2", Agent: "bash"}},
-		[]codex.ProfileInfo{{Name: "jerryf", Home: "/root/.codex-jerryf", Label: "jf"}},
+		[]providers.ProfileInfo{{Name: "jerryf", Home: "/root/.codex-jerryf", Label: "jf"}},
 		[]usage.LimitSnapshot{{Provider: "codex", Profile: "jerryf", FiveHourRemainingPercent: &five, WeeklyRemainingPercent: &week}},
 		usage.UsageSummary{},
 		nil,
@@ -43,7 +43,7 @@ func TestBuildReportsPublishesLimitLabels(t *testing.T) {
 func TestBuildReportsUsesProcProfileOverride(t *testing.T) {
 	reports := BuildReports(
 		[]Pane{{PaneID: "p1", Agent: "codex", Label: "manager"}},
-		[]codex.ProfileInfo{{Name: "default", Home: "/root/.codex"}, {Name: "spark", Home: "/root/.codex-spark"}},
+		[]providers.ProfileInfo{{Name: "default", Home: "/root/.codex"}, {Name: "spark", Home: "/root/.codex-spark"}},
 		[]usage.LimitSnapshot{{Provider: "codex", Profile: "spark"}},
 		usage.UsageSummary{},
 		map[string]string{"p1": "spark"},
@@ -60,7 +60,7 @@ func TestBuildReportsUsesProcProfileOverride(t *testing.T) {
 func TestBuildReportsPublishesProcMappedPaneWithoutAgent(t *testing.T) {
 	reports := BuildReports(
 		[]Pane{{PaneID: "p1", Label: "shell"}},
-		[]codex.ProfileInfo{{Name: "default", Home: "/root/.codex"}, {Name: "spark", Home: "/root/.codex-spark"}},
+		[]providers.ProfileInfo{{Name: "default", Home: "/root/.codex"}, {Name: "spark", Home: "/root/.codex-spark"}},
 		[]usage.LimitSnapshot{{Provider: "codex", Profile: "spark"}},
 		usage.UsageSummary{},
 		map[string]string{"p1": "spark"},
@@ -80,7 +80,7 @@ func TestBuildReportsPublishesProcMappedPaneWithoutAgent(t *testing.T) {
 func TestBuildReportsIgnoresStaleDisplayAgent(t *testing.T) {
 	reports := BuildReports(
 		[]Pane{{PaneID: "p1", Agent: "codex", Label: "manager", DisplayAgent: "codex-spark"}},
-		[]codex.ProfileInfo{{Name: "default", Home: "/root/.codex"}, {Name: "spark", Home: "/root/.codex-spark"}},
+		[]providers.ProfileInfo{{Name: "default", Home: "/root/.codex"}, {Name: "spark", Home: "/root/.codex-spark"}},
 		[]usage.LimitSnapshot{{Provider: "codex", Profile: "default"}},
 		usage.UsageSummary{},
 		nil,
@@ -97,7 +97,7 @@ func TestBuildReportsIgnoresStaleDisplayAgent(t *testing.T) {
 func TestBuildReportsInfersProfileFromHerdrTitle(t *testing.T) {
 	reports := BuildReports(
 		[]Pane{{PaneID: "p1", Agent: "codex", Title: "manager spark"}},
-		[]codex.ProfileInfo{{Name: "default", Home: "/root/.codex"}, {Name: "spark", Home: "/root/.codex-spark"}},
+		[]providers.ProfileInfo{{Name: "default", Home: "/root/.codex"}, {Name: "spark", Home: "/root/.codex-spark"}},
 		[]usage.LimitSnapshot{{Provider: "codex", Profile: "spark"}},
 		usage.UsageSummary{},
 		nil,
@@ -114,7 +114,7 @@ func TestBuildReportsInfersProfileFromHerdrTitle(t *testing.T) {
 func TestBuildReportsUsageModeMatchesPaneCWD(t *testing.T) {
 	reports := BuildReports(
 		[]Pane{{PaneID: "p1", Agent: "codex", CWD: "/root/repo"}},
-		[]codex.ProfileInfo{{Name: "default", Home: "/root/.codex", Label: "codex"}},
+		[]providers.ProfileInfo{{Name: "default", Home: "/root/.codex", Label: "codex"}},
 		nil,
 		usage.UsageSummary{
 			Date:        "2026-06-09",
@@ -137,7 +137,7 @@ func TestBuildReportsUsageModeMatchesPaneCWD(t *testing.T) {
 func TestBuildReportsUsageModeDoesNotFallbackToGlobalForUnmatchedCWD(t *testing.T) {
 	reports := BuildReports(
 		[]Pane{{PaneID: "p1", Agent: "codex", CWD: "/root/other"}},
-		[]codex.ProfileInfo{{Name: "default", Home: "/root/.codex", Label: "codex"}},
+		[]providers.ProfileInfo{{Name: "default", Home: "/root/.codex", Label: "codex"}},
 		nil,
 		usage.UsageSummary{
 			Date:        "2026-06-09",
@@ -161,7 +161,7 @@ func TestAutoModeKeepsLowQuotaVisible(t *testing.T) {
 	five := 5.0
 	reports := BuildReports(
 		[]Pane{{PaneID: "p1", Agent: "codex"}},
-		[]codex.ProfileInfo{{Name: "default", Home: "/root/.codex"}},
+		[]providers.ProfileInfo{{Name: "default", Home: "/root/.codex"}},
 		[]usage.LimitSnapshot{{Provider: "codex", Profile: "default", FiveHourRemainingPercent: &five}},
 		usage.UsageSummary{Date: "2026-06-09", TotalTokens: 1_000, CostUSD: 0.01},
 		nil,
@@ -169,6 +169,41 @@ func TestAutoModeKeepsLowQuotaVisible(t *testing.T) {
 	)
 	if got := reports[0].Labels["blocked"]; got != "default 5%5h ??%wk" {
 		t.Fatalf("unexpected auto label: %q", got)
+	}
+}
+
+func TestBuildReportsHandlesClaudeProvider(t *testing.T) {
+	five := 42.0
+	reports := BuildReports(
+		[]Pane{{PaneID: "p1", Agent: "claude", Label: "work crazyj"}, {PaneID: "p2", Agent: "codex", Label: "work jerryf"}},
+		[]providers.ProfileInfo{{Name: "crazyj", Home: "/root/.claude-crazyj", Label: "cj"}},
+		[]usage.LimitSnapshot{{Provider: "claude", Profile: "crazyj", FiveHourRemainingPercent: &five}},
+		usage.UsageSummary{},
+		nil,
+		BuildOptions{Provider: "claude", Mode: ModeLimit, Source: "test", TTL: time.Minute, DefaultProfile: "default", Seq: 10},
+	)
+	if len(reports) != 1 {
+		t.Fatalf("expected only the claude pane, got %+v", reports)
+	}
+	report := reports[0]
+	if report.Provider != "claude" || report.DisplayAgent != "claude-crazyj" || !report.AgentGuard {
+		t.Fatalf("unexpected claude report: %+v", report)
+	}
+	if report.Labels["working"] != "cj 42%5h ??%wk" {
+		t.Fatalf("unexpected claude label: %q", report.Labels["working"])
+	}
+}
+
+func TestProviderActiveMatchesAgentOrProcMapping(t *testing.T) {
+	panes := []Pane{{PaneID: "p1", Agent: "codex"}, {PaneID: "p2", Label: "shell"}}
+	if !providerActive("codex", panes, nil) {
+		t.Fatal("expected codex active via agent")
+	}
+	if providerActive("claude", panes, nil) {
+		t.Fatal("expected claude inactive without a matching pane")
+	}
+	if !providerActive("claude", panes, map[string]string{"p2": "default"}) {
+		t.Fatal("expected claude active via proc mapping")
 	}
 }
 
@@ -222,5 +257,50 @@ exit 42
 	}
 	if !strings.Contains(out.String(), "publisher report error for pane p1") {
 		t.Fatalf("expected logged report error, got %q", out.String())
+	}
+}
+
+// With claude enabled by default but no claude pane present, the publisher must
+// still produce codex reports and must not touch claude's network endpoint.
+func TestPublishOnceDryRunSkipsInactiveProvider(t *testing.T) {
+	dir := t.TempDir()
+	home := filepath.Join(dir, "codex-home")
+	if err := os.MkdirAll(home, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	script := filepath.Join(dir, "fake-herdr")
+	body := `#!/bin/sh
+if [ "$1 $2" = "pane list" ]; then
+  echo '{"result":{"panes":[{"pane_id":"p1","agent":"codex","label":"work"}]}}'
+  exit 0
+fi
+exit 0
+`
+	if err := os.WriteFile(script, []byte(body), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.Defaults() // codex AND claude enabled
+	codexProvider := cfg.Usage.Providers["codex"]
+	codexProvider.CacheDir = filepath.Join(dir, "codex-cache")
+	codexProvider.Profiles = map[string]config.ProfileConfig{"default": {Home: home, Label: "codex"}}
+	cfg.Usage.Providers["codex"] = codexProvider
+
+	var out bytes.Buffer
+	publisher := NewPublisher(cfg, PublisherOptions{
+		Command:  script,
+		Once:     true,
+		DryRun:   true,
+		Interval: time.Second,
+		Out:      &out,
+	})
+	if err := publisher.PublishOnce(context.Background()); err != nil {
+		t.Fatalf("PublishOnce returned error: %v", err)
+	}
+	if !strings.Contains(out.String(), `"provider": "codex"`) {
+		t.Fatalf("expected a codex report, got %q", out.String())
+	}
+	if strings.Contains(out.String(), "claude collect error") {
+		t.Fatalf("claude has no pane and must be skipped, not collected: %q", out.String())
 	}
 }
