@@ -9,6 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/jerryfane/agent-tools/internal/codex"
 	"github.com/jerryfane/agent-tools/internal/config"
+	herdrpub "github.com/jerryfane/agent-tools/internal/herdr"
 	usagetui "github.com/jerryfane/agent-tools/internal/tui"
 	"github.com/jerryfane/agent-tools/internal/usage"
 	"github.com/spf13/cobra"
@@ -39,6 +40,7 @@ func newUsageCommand(root *rootOptions) *cobra.Command {
 	cmd.AddCommand(newUsageTodayCommand(root))
 	cmd.AddCommand(newUsageSessionsCommand(root))
 	cmd.AddCommand(newUsageTUICommand(root))
+	cmd.AddCommand(newUsageHerdrPublisherCommand(root))
 	return cmd
 }
 
@@ -225,6 +227,56 @@ func newUsageTUICommand(root *rootOptions) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&provider, "provider", "codex", "usage provider")
+	return cmd
+}
+
+func newUsageHerdrPublisherCommand(root *rootOptions) *cobra.Command {
+	var provider string
+	var mode string
+	var interval time.Duration
+	var source string
+	var herdrCommand string
+	var once bool
+	var dryRun bool
+	var forceRefresh bool
+	cmd := &cobra.Command{
+		Use:   "herdr-publisher",
+		Short: "Publish compact usage labels to Herdr pane metadata",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := loadAppConfig(root)
+			if err != nil {
+				return err
+			}
+			if provider == "" {
+				provider = "codex"
+			}
+			if provider != "codex" {
+				return fmt.Errorf("usage herdr-publisher provider %q is not implemented yet", provider)
+			}
+			if !cfg.Usage.Providers["codex"].Enabled {
+				return fmt.Errorf("codex provider is disabled")
+			}
+			publisher := herdrpub.NewPublisher(cfg, herdrpub.PublisherOptions{
+				Mode:       mode,
+				Interval:   interval,
+				Source:     source,
+				Command:    herdrCommand,
+				Once:       once,
+				DryRun:     dryRun,
+				ForceLimit: forceRefresh,
+				Out:        cmd.OutOrStdout(),
+			})
+			return publisher.Run(cmd.Context())
+		},
+	}
+	cmd.Flags().StringVar(&provider, "provider", "codex", "usage provider")
+	cmd.Flags().StringVar(&mode, "mode", herdrpub.ModeLimit, "publisher mode: limit, usage, or auto")
+	cmd.Flags().DurationVar(&interval, "interval", 30*time.Second, "refresh interval")
+	cmd.Flags().StringVar(&source, "source", "local:agent-tools:herdr-publisher", "Herdr metadata source id")
+	cmd.Flags().StringVar(&herdrCommand, "herdr-command", "herdr", "Herdr command")
+	cmd.Flags().BoolVar(&once, "once", false, "publish once and exit")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "print metadata reports instead of calling Herdr")
+	cmd.Flags().BoolVar(&forceRefresh, "force-refresh", false, "bypass Codex limit cache once")
 	return cmd
 }
 

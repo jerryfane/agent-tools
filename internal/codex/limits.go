@@ -51,6 +51,24 @@ type profile struct {
 	label string
 }
 
+type ProfileInfo struct {
+	Name  string `json:"name"`
+	Home  string `json:"home"`
+	Label string `json:"label,omitempty"`
+}
+
+func DiscoverProfiles(cfg config.Config) ([]ProfileInfo, error) {
+	profiles, err := (&LimitsClient{cfg: cfg}).discoverProfiles(cfg.Usage.Providers["codex"])
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ProfileInfo, 0, len(profiles))
+	for _, prof := range profiles {
+		out = append(out, ProfileInfo{Name: prof.name, Home: prof.home, Label: prof.label})
+	}
+	return out, nil
+}
+
 func (c *LimitsClient) Limits(ctx context.Context, opts LimitsOptions) ([]usage.LimitSnapshot, error) {
 	provider := c.cfg.Usage.Providers["codex"]
 	profiles, err := c.discoverProfiles(provider)
