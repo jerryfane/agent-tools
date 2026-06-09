@@ -27,6 +27,28 @@ agent-tools usage doctor
 agent-tools usage herdr-publisher
 ```
 
+## Current CLI
+
+```bash
+agent-tools usage providers
+agent-tools usage limits --provider codex
+agent-tools usage limits --provider codex --json
+```
+
+`usage limits` is Codex-only right now. It reads local Codex profile
+`auth.json` files and calls the ChatGPT/Codex quota endpoint to report
+remaining 5-hour and weekly subscription quota. It does not start a Codex
+session or send prompts to a model, but the endpoint is internal and may
+change.
+
+Profiles can be configured explicitly in `~/.config/agent-tools/config.toml`.
+If no Codex profiles are configured, the tool discovers `~/.codex-*`
+directories containing `auth.json`, then falls back to `~/.codex`.
+
+Limit snapshots and refreshed access tokens are cached under the OS user cache
+directory with private permissions. Do not commit local config, auth files, or
+cache files.
+
 ## Status
 
 This repository is newly created. See the initial planning issue for the first
