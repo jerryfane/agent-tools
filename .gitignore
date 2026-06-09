@@ -1,0 +1,15 @@
+# Build output
+/bin/
+/dist/
+/coverage.out
+
+# Local config and caches
+/.agent-tools.local.toml
+/.cache/
+*.log
+
+# Editor/OS noise
+.DS_Store
+.idea/
+.vscode/
+*.swp

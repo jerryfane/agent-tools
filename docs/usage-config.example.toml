@@ -1,0 +1,18 @@
+[usage]
+timezone = "Europe/Berlin"
+refresh_limits_seconds = 300
+refresh_usage_seconds = 60
+refresh_process_seconds = 15
+
+[usage.providers.codex]
+enabled = true
+default_profile = "default"
+ccusage_enabled = true
+ccusage_command = "ccusage"
+
+[usage.providers.codex.profiles.default]
+home = "~/.codex"
+label = "codex"
+
+[usage.providers.claude]
+enabled = false
