@@ -67,7 +67,11 @@ func Defaults() Config {
 					Profiles:       map[string]ProfileConfig{},
 				},
 				"claude": {
-					Enabled: false,
+					Enabled:        true,
+					DefaultProfile: "default",
+					CCUsageEnabled: true,
+					CCUsageCommand: "ccusage",
+					Profiles:       map[string]ProfileConfig{},
 				},
 			},
 		},

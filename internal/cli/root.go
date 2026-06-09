@@ -7,9 +7,9 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/jerryfane/agent-tools/internal/codex"
 	"github.com/jerryfane/agent-tools/internal/config"
 	herdrpub "github.com/jerryfane/agent-tools/internal/herdr"
+	"github.com/jerryfane/agent-tools/internal/providers"
 	usagetui "github.com/jerryfane/agent-tools/internal/tui"
 	"github.com/jerryfane/agent-tools/internal/usage"
 	"github.com/spf13/cobra"
@@ -64,16 +64,7 @@ func newUsageLimitsCommand(root *rootOptions) *cobra.Command {
 			if provider == "" {
 				provider = "codex"
 			}
-			if provider != "codex" {
-				return fmt.Errorf("usage limits provider %q is not implemented yet", provider)
-			}
-			if !cfg.Usage.Providers["codex"].Enabled {
-				return fmt.Errorf("codex provider is disabled")
-			}
-			client := codex.NewLimitsClient(cfg)
-			snapshots, err := client.Limits(context.Background(), codex.LimitsOptions{
-				ForceRefresh: forceRefresh,
-			})
+			snapshots, err := providers.LimitsFor(context.Background(), cfg, provider, forceRefresh)
 			if err != nil {
 				return err
 			}
@@ -97,7 +88,7 @@ func newUsageLimitsCommand(root *rootOptions) *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&provider, "provider", "codex", "usage provider")
+	cmd.Flags().StringVar(&provider, "provider", "codex", "usage provider (codex, claude)")
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "print JSON")
 	cmd.Flags().BoolVar(&forceRefresh, "force-refresh", false, "bypass local cache once")
 	return cmd
@@ -118,18 +109,11 @@ func newUsageTodayCommand(root *rootOptions) *cobra.Command {
 			if provider == "" {
 				provider = "codex"
 			}
-			if provider != "codex" {
-				return fmt.Errorf("usage today provider %q is not implemented yet", provider)
-			}
-			if !cfg.Usage.Providers["codex"].Enabled {
-				return fmt.Errorf("codex provider is disabled")
-			}
 			date, err := parseDate(dateValue, cfg.Usage.Timezone)
 			if err != nil {
 				return err
 			}
-			client := codex.NewUsageClient(cfg)
-			summary, err := client.Usage(context.Background(), codex.UsageOptions{Date: date})
+			summary, err := providers.UsageFor(context.Background(), cfg, provider, date)
 			if err != nil {
 				return err
 			}
@@ -145,7 +129,7 @@ func newUsageTodayCommand(root *rootOptions) *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&provider, "provider", "codex", "usage provider")
+	cmd.Flags().StringVar(&provider, "provider", "codex", "usage provider (codex, claude)")
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "print JSON")
 	cmd.Flags().StringVar(&dateValue, "date", "", "date in YYYY-MM-DD format, default today in configured timezone")
 	return cmd
@@ -167,21 +151,11 @@ func newUsageSessionsCommand(root *rootOptions) *cobra.Command {
 			if provider == "" {
 				provider = "codex"
 			}
-			if provider != "codex" {
-				return fmt.Errorf("usage sessions provider %q is not implemented yet", provider)
-			}
-			if !cfg.Usage.Providers["codex"].Enabled {
-				return fmt.Errorf("codex provider is disabled")
-			}
 			date, err := parseDate(dateValue, cfg.Usage.Timezone)
 			if err != nil {
 				return err
 			}
-			client := codex.NewUsageClient(cfg)
-			sessions, err := client.Sessions(context.Background(), codex.UsageOptions{
-				Date:  date,
-				Limit: limit,
-			})
+			sessions, err := providers.SessionsFor(context.Background(), cfg, provider, date, limit)
 			if err != nil {
 				return err
 			}
@@ -196,7 +170,7 @@ func newUsageSessionsCommand(root *rootOptions) *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&provider, "provider", "codex", "usage provider")
+	cmd.Flags().StringVar(&provider, "provider", "codex", "usage provider (codex, claude)")
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "print JSON")
 	cmd.Flags().StringVar(&dateValue, "date", "", "date in YYYY-MM-DD format, default today in configured timezone")
 	cmd.Flags().IntVar(&limit, "limit", 20, "maximum sessions to show, use 0 for all")
@@ -227,7 +201,7 @@ func newUsageTUICommand(root *rootOptions) *cobra.Command {
 			return err
 		},
 	}
-	cmd.Flags().StringVar(&provider, "provider", "codex", "usage provider")
+	cmd.Flags().StringVar(&provider, "provider", "codex", "usage provider (codex, claude)")
 	return cmd
 }
 
@@ -270,7 +244,7 @@ func newUsageHerdrPublisherCommand(root *rootOptions) *cobra.Command {
 			return publisher.Run(cmd.Context())
 		},
 	}
-	cmd.Flags().StringVar(&provider, "provider", "codex", "usage provider")
+	cmd.Flags().StringVar(&provider, "provider", "codex", "usage provider (codex, claude)")
 	cmd.Flags().StringVar(&mode, "mode", herdrpub.ModeLimit, "publisher mode: limit, usage, or auto")
 	cmd.Flags().DurationVar(&interval, "interval", 30*time.Second, "refresh interval")
 	cmd.Flags().StringVar(&source, "source", "local:agent-tools:herdr-publisher", "Herdr metadata source id")

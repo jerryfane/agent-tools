@@ -62,12 +62,21 @@ func (c *UsageClient) Usage(ctx context.Context, opts UsageOptions) (usage.Usage
 func (c *UsageClient) Sessions(ctx context.Context, opts UsageOptions) ([]usage.SessionUsage, error) {
 	date := c.date(opts.Date)
 	provider := c.provider()
-	raw, err := c.runCCUsageSessions(ctx, provider, date)
+	// ccusage's `claude session` subcommand does not honor a single-day
+	// --since/--until window (it returns nothing), so fetch all sessions and
+	// filter client-side by last-activity date in the configured timezone, to
+	// match how `claude daily` groups by day.
+	raw, err := c.runCCUsageSessions(ctx, provider)
 	if err != nil {
 		return nil, err
 	}
+	loc := configLocation(c.cfg.Usage.Timezone)
+	target := date.In(loc).Format("2006-01-02")
 	out := make([]usage.SessionUsage, 0, len(raw.Sessions))
 	for _, item := range raw.Sessions {
+		if !sessionOnDate(item.LastActivity, loc, target) {
+			continue
+		}
 		repo := item.ProjectPath
 		if repo == "" {
 			repo = "unknown"
@@ -159,21 +168,21 @@ func (c *UsageClient) provider() config.ProviderConfig {
 
 func (c *UsageClient) runCCUsageDaily(ctx context.Context, provider config.ProviderConfig, date time.Time) (ccusageDailyResponse, error) {
 	var out ccusageDailyResponse
-	if err := c.runCCUsage(ctx, provider, "daily", date, &out); err != nil {
+	if err := c.runCCUsage(ctx, provider, "daily", &date, &out); err != nil {
 		return ccusageDailyResponse{}, err
 	}
 	return out, nil
 }
 
-func (c *UsageClient) runCCUsageSessions(ctx context.Context, provider config.ProviderConfig, date time.Time) (ccusageSessionResponse, error) {
+func (c *UsageClient) runCCUsageSessions(ctx context.Context, provider config.ProviderConfig) (ccusageSessionResponse, error) {
 	var out ccusageSessionResponse
-	if err := c.runCCUsage(ctx, provider, "session", date, &out); err != nil {
+	if err := c.runCCUsage(ctx, provider, "session", nil, &out); err != nil {
 		return ccusageSessionResponse{}, err
 	}
 	return out, nil
 }
 
-func (c *UsageClient) runCCUsage(ctx context.Context, provider config.ProviderConfig, subcommand string, date time.Time, out any) error {
+func (c *UsageClient) runCCUsage(ctx context.Context, provider config.ProviderConfig, subcommand string, date *time.Time, out any) error {
 	if !provider.CCUsageEnabled {
 		return errors.New("claude ccusage integration is disabled; enable usage.providers.claude.ccusage_enabled")
 	}
@@ -184,9 +193,12 @@ func (c *UsageClient) runCCUsage(ctx context.Context, provider config.ProviderCo
 	if len(parts) == 0 {
 		return errors.New("claude ccusage command is empty")
 	}
-	day := date.Format("2006-01-02")
 	args := append([]string{}, parts[1:]...)
-	args = append(args, "claude", subcommand, "--json", "--since", day, "--until", day)
+	args = append(args, "claude", subcommand, "--json")
+	if date != nil {
+		day := date.Format("2006-01-02")
+		args = append(args, "--since", day, "--until", day)
+	}
 	if tz := strings.TrimSpace(c.cfg.Usage.Timezone); tz != "" && !strings.EqualFold(tz, "local") {
 		args = append(args, "--timezone", tz)
 	}
@@ -274,6 +286,20 @@ func defaultProcessLines() ([]string, error) {
 	}
 	lines := strings.Split(string(data), "\n")
 	return lines, nil
+}
+
+// sessionOnDate reports whether a session's last-activity timestamp (RFC3339,
+// UTC) falls on the target YYYY-MM-DD date in the given location. Unparseable or
+// empty timestamps are treated as not matching.
+func sessionOnDate(lastActivity string, loc *time.Location, target string) bool {
+	if strings.TrimSpace(lastActivity) == "" {
+		return false
+	}
+	t, err := time.Parse(time.RFC3339, lastActivity)
+	if err != nil {
+		return false
+	}
+	return t.In(loc).Format("2006-01-02") == target
 }
 
 func configLocation(name string) *time.Location {

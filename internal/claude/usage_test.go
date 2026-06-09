@@ -23,7 +23,7 @@ if [ "$2" = "daily" ]; then
 JSON
 else
   cat <<'JSON'
-{"sessions":[{"sessionId":"uuid-low","projectPath":"-root-app","totalTokens":500,"totalCost":0.10},{"sessionId":"uuid-high","projectPath":"-root-other","totalTokens":1500,"totalCost":0.30}],"totals":{"totalTokens":2000,"totalCost":0.40}}
+{"sessions":[{"sessionId":"uuid-low","projectPath":"-root-app","lastActivity":"2026-06-08T10:00:00Z","totalTokens":500,"totalCost":0.10},{"sessionId":"uuid-high","projectPath":"-root-other","lastActivity":"2026-06-08T12:00:00Z","totalTokens":1500,"totalCost":0.30},{"sessionId":"uuid-other-day","projectPath":"-root-old","lastActivity":"2026-06-07T12:00:00Z","totalTokens":9999,"totalCost":9.99}],"totals":{"totalTokens":11999,"totalCost":10.39}}
 JSON
 fi
 `
@@ -36,6 +36,7 @@ fi
 func newUsageConfig(t *testing.T, ccusageCommand string) config.Config {
 	t.Helper()
 	cfg := config.Defaults()
+	cfg.Usage.Timezone = "UTC" // deterministic client-side session date filtering
 	provider := cfg.Usage.Providers["claude"]
 	provider.CCUsageEnabled = true
 	provider.CCUsageCommand = ccusageCommand
@@ -81,8 +82,13 @@ func TestUsageInvokesClaudeSubcommandAndBuildsSummary(t *testing.T) {
 	if !strings.Contains(got, "claude daily --json --since 2026-06-08 --until 2026-06-08") {
 		t.Fatalf("unexpected daily args: %q", got)
 	}
-	if !strings.Contains(got, "claude session --json --since 2026-06-08 --until 2026-06-08") {
+	if !strings.Contains(got, "claude session --json") {
 		t.Fatalf("unexpected session args: %q", got)
+	}
+	// Sessions must NOT be date-filtered at the ccusage layer (single-day session
+	// filtering returns nothing); filtering happens client-side instead.
+	if strings.Contains(got, "session --json --since") {
+		t.Fatalf("session invocation must not pass --since/--until: %q", got)
 	}
 }
 
@@ -132,7 +138,10 @@ func TestActiveMatchesClaudeExecutableOnly(t *testing.T) {
 }
 
 func TestRunCCUsageDisabled(t *testing.T) {
-	cfg := config.Defaults() // claude provider has CCUsageEnabled=false by default
+	cfg := config.Defaults()
+	provider := cfg.Usage.Providers["claude"]
+	provider.CCUsageEnabled = false
+	cfg.Usage.Providers["claude"] = provider
 	client := NewUsageClient(cfg)
 	_, err := client.Sessions(context.Background(), UsageOptions{Date: time.Date(2026, 6, 8, 0, 0, 0, 0, time.UTC)})
 	if err == nil || !strings.Contains(err.Error(), "ccusage integration is disabled") {
