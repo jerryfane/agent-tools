@@ -181,7 +181,7 @@ func (c *UsageClient) runCCUsage(ctx context.Context, provider config.ProviderCo
 	if !provider.CCUsageEnabled {
 		return errors.New("codex ccusage integration is disabled; enable usage.providers.codex.ccusage_enabled")
 	}
-	parts, err := splitCommand(firstNonEmpty(provider.CCUsageCommand, "ccusage"))
+	parts, err := SplitCommand(firstNonEmpty(provider.CCUsageCommand, "ccusage"))
 	if err != nil {
 		return err
 	}
@@ -514,7 +514,7 @@ func defaultProcessLines() ([]string, error) {
 	return lines, nil
 }
 
-func splitCommand(command string) ([]string, error) {
+func SplitCommand(command string) ([]string, error) {
 	var out []string
 	var current strings.Builder
 	var quote rune

@@ -39,7 +39,7 @@ func TestCCUsageSessionJSONNormalizes(t *testing.T) {
 }
 
 func TestSplitCommandSupportsQuotedArgs(t *testing.T) {
-	parts, err := splitCommand(`npx --yes "ccusage"`)
+	parts, err := SplitCommand(`npx --yes "ccusage"`)
 	if err != nil {
 		t.Fatalf("splitCommand returned error: %v", err)
 	}
