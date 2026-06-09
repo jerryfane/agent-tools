@@ -33,6 +33,10 @@ agent-tools usage herdr-publisher
 agent-tools usage providers
 agent-tools usage limits --provider codex
 agent-tools usage limits --provider codex --json
+agent-tools usage today --provider codex
+agent-tools usage today --provider codex --json
+agent-tools usage sessions --provider codex
+agent-tools usage sessions --provider codex --json
 ```
 
 `usage limits` is Codex-only right now. It reads local Codex profile
@@ -40,6 +44,14 @@ agent-tools usage limits --provider codex --json
 remaining 5-hour and weekly subscription quota. It does not start a Codex
 session or send prompts to a model, but the endpoint is internal and may
 change.
+
+`usage today` and `usage sessions` are Codex-only right now and use `ccusage`
+as an external structured JSON backend. Install `ccusage` on `PATH`, or set
+`usage.providers.codex.ccusage_command = "npx --yes ccusage"` in local config.
+These commands read local `~/.codex/sessions` JSONL files to enrich sessions
+with cwd/repo, task type, active state, and last prompt preview. They do not
+split usage by Codex subscription when multiple Codex profiles share the same
+session directory.
 
 Profiles can be configured explicitly in `~/.config/agent-tools/config.toml`.
 If no Codex profiles are configured, the tool discovers `~/.codex-*`

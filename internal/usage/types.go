@@ -47,6 +47,7 @@ type UsageGroup struct {
 	Provider string  `json:"provider"`
 	Repo     string  `json:"repo"`
 	Type     string  `json:"type"`
+	Active   bool    `json:"active"`
 	Sessions int     `json:"sessions"`
 	Tokens   int64   `json:"tokens"`
 	CostUSD  float64 `json:"cost_usd"`

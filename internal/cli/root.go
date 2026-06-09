@@ -34,6 +34,8 @@ func newUsageCommand(root *rootOptions) *cobra.Command {
 	}
 	cmd.AddCommand(newUsageProvidersCommand(root))
 	cmd.AddCommand(newUsageLimitsCommand(root))
+	cmd.AddCommand(newUsageTodayCommand(root))
+	cmd.AddCommand(newUsageSessionsCommand(root))
 	return cmd
 }
 
@@ -95,6 +97,106 @@ func newUsageLimitsCommand(root *rootOptions) *cobra.Command {
 	return cmd
 }
 
+func newUsageTodayCommand(root *rootOptions) *cobra.Command {
+	var provider string
+	var jsonOut bool
+	var dateValue string
+	cmd := &cobra.Command{
+		Use:   "today",
+		Short: "Show current-day token usage grouped by repo and task type",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := loadAppConfig(root)
+			if err != nil {
+				return err
+			}
+			if provider == "" {
+				provider = "codex"
+			}
+			if provider != "codex" {
+				return fmt.Errorf("usage today provider %q is not implemented yet", provider)
+			}
+			if !cfg.Usage.Providers["codex"].Enabled {
+				return fmt.Errorf("codex provider is disabled")
+			}
+			date, err := parseDate(dateValue, cfg.Usage.Timezone)
+			if err != nil {
+				return err
+			}
+			client := codex.NewUsageClient(cfg)
+			summary, err := client.Usage(context.Background(), codex.UsageOptions{Date: date})
+			if err != nil {
+				return err
+			}
+			if jsonOut {
+				return writeJSON(cmd.OutOrStdout(), summary)
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "Provider: %s  Date: %s  Tokens: %s  Cost: $%.2f\n\n", summary.Provider, summary.Date, intValue(summary.TotalTokens), summary.CostUSD)
+			table := newTable("REPO/CWD", "TYPE", "ACTIVE", "SESSIONS", "TOKENS", "COST")
+			for _, group := range summary.Groups {
+				table.Add(shortPath(group.Repo), group.Type, boolText(group.Active), fmt.Sprint(group.Sessions), intValue(group.Tokens), fmt.Sprintf("$%.2f", group.CostUSD))
+			}
+			table.Render(cmd.OutOrStdout())
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&provider, "provider", "codex", "usage provider")
+	cmd.Flags().BoolVar(&jsonOut, "json", false, "print JSON")
+	cmd.Flags().StringVar(&dateValue, "date", "", "date in YYYY-MM-DD format, default today in configured timezone")
+	return cmd
+}
+
+func newUsageSessionsCommand(root *rootOptions) *cobra.Command {
+	var provider string
+	var jsonOut bool
+	var dateValue string
+	var limit int
+	cmd := &cobra.Command{
+		Use:   "sessions",
+		Short: "Show highest-token sessions for a day",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := loadAppConfig(root)
+			if err != nil {
+				return err
+			}
+			if provider == "" {
+				provider = "codex"
+			}
+			if provider != "codex" {
+				return fmt.Errorf("usage sessions provider %q is not implemented yet", provider)
+			}
+			if !cfg.Usage.Providers["codex"].Enabled {
+				return fmt.Errorf("codex provider is disabled")
+			}
+			date, err := parseDate(dateValue, cfg.Usage.Timezone)
+			if err != nil {
+				return err
+			}
+			client := codex.NewUsageClient(cfg)
+			sessions, err := client.Sessions(context.Background(), codex.UsageOptions{
+				Date:  date,
+				Limit: limit,
+			})
+			if err != nil {
+				return err
+			}
+			if jsonOut {
+				return writeJSON(cmd.OutOrStdout(), sessions)
+			}
+			table := newTable("SESSION", "REPO/CWD", "TYPE", "ACTIVE", "TOKENS", "COST", "LAST PROMPT")
+			for _, session := range sessions {
+				table.Add(session.SessionID, shortPath(session.Repo), session.Type, boolText(session.Active), intValue(session.Tokens), fmt.Sprintf("$%.2f", session.CostUSD), session.LastPrompt)
+			}
+			table.Render(cmd.OutOrStdout())
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&provider, "provider", "codex", "usage provider")
+	cmd.Flags().BoolVar(&jsonOut, "json", false, "print JSON")
+	cmd.Flags().StringVar(&dateValue, "date", "", "date in YYYY-MM-DD format, default today in configured timezone")
+	cmd.Flags().IntVar(&limit, "limit", 20, "maximum sessions to show, use 0 for all")
+	return cmd
+}
+
 func labelOrProfile(snapshot usage.LimitSnapshot) string {
 	if snapshot.Label != "" {
 		return snapshot.Label
@@ -136,6 +238,34 @@ func sourceValue(snapshot usage.LimitSnapshot) string {
 		return snapshot.Source
 	}
 	return fmt.Sprintf("%s %s old", snapshot.Source, durationText(time.Duration(*snapshot.CacheAgeSeconds)*time.Second))
+}
+
+func parseDate(value, timezone string) (time.Time, error) {
+	location := configLocation(timezone)
+	if strings.TrimSpace(value) == "" {
+		now := time.Now().In(location)
+		return time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, location), nil
+	}
+	parsed, err := time.ParseInLocation("2006-01-02", value, location)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("invalid date %q, expected YYYY-MM-DD", value)
+	}
+	return parsed, nil
+}
+
+func intValue(value int64) string {
+	return fmt.Sprintf("%d", value)
+}
+
+func shortPath(value string) string {
+	if value == "" {
+		return "unknown"
+	}
+	const max = 48
+	if len(value) <= max {
+		return value
+	}
+	return "..." + value[len(value)-max+3:]
 }
 
 func durationText(duration time.Duration) string {
