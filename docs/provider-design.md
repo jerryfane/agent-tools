@@ -1,7 +1,12 @@
 # Provider Design
 
-`agent-tools usage` is provider-shaped even though Codex is the only
-implemented provider today.
+`agent-tools usage` is provider-shaped. Codex and Claude Code are implemented
+today; new agent CLIs slot in behind the same contract.
+
+The CLI, TUI, and Herdr publisher select a provider through
+`internal/providers`, which dispatches `Limits`/`Usage`/`Sessions` to the
+matching per-agent package (`internal/codex`, `internal/claude`) rather than
+hardcoding one provider.
 
 The shared provider contract is:
 
@@ -42,9 +47,26 @@ Codex implements:
 Important limitation: Codex limits are per profile, while token usage is based
 on the local session corpus consumed by `ccusage`.
 
+## Claude V1
+
+Claude (`internal/claude`) mirrors the Codex shape:
+
+- profile discovery from explicit config, `~/.claude-*`, and `~/.claude`;
+- per-profile limit fetching from Claude Code's OAuth usage endpoint, with a
+  sticky cooldown on `429` (the endpoint rate-limits aggressive polling);
+- private local limit and token cache files (the credentials file is read, never
+  written);
+- current-day usage and sessions through `ccusage claude ...`, with sessions
+  filtered client-side by last-activity date;
+- active Claude Code process detection (sessions are not correlated to processes
+  in v1).
+
+Important limitation: macOS Keychain credentials are not yet read; see
+[claude.md](claude.md).
+
 ## Adding Another Provider
 
-For Claude, Gemini, or another agent CLI:
+For Gemini or another agent CLI:
 
 1. Add provider config under `usage.providers.<name>`.
 2. Implement provider-specific limit, usage, session, active, and doctor logic

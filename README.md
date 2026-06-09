@@ -121,11 +121,26 @@ For machines without a global `ccusage` binary:
 ccusage_command = "npx --yes ccusage"
 ```
 
+Claude Code (Pro/Max) is enabled by default and discovered from `~/.claude`
+(and `~/.claude-<name>` profiles). Override the discovery explicitly with:
+
+```toml
+[usage.providers.claude]
+enabled = true
+ccusage_enabled = true
+ccusage_command = "ccusage"
+
+[usage.providers.claude.profiles.default]
+home = "~/.claude"
+label = "claude"
+```
+
 More details:
 
 - [Configuration Guide](docs/config.md)
 - [Privacy And Local Data](docs/privacy.md)
 - [Provider Design](docs/provider-design.md)
+- [Claude Provider](docs/claude.md)
 
 ## Codex Limits Versus Usage
 
@@ -135,6 +150,12 @@ authenticated quota endpoint.
 Token usage is local-session based because `ccusage` reads local Codex session
 logs. If multiple Codex subscriptions share the same `~/.codex/sessions`
 corpus, usage totals may not split cleanly by subscription.
+
+The Claude provider works the same way, with one important difference: its
+quota endpoint rate-limits aggressively, so agent-tools refreshes it at most
+every five minutes and, on a `429`, stops calling it for 30 minutes while
+serving cached numbers (even under `--force-refresh`). See
+[docs/claude.md](docs/claude.md).
 
 ## Compatibility Wrappers
 
