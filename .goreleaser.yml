@@ -1,0 +1,36 @@
+version: 2
+
+project_name: agent-tools
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: agent-tools
+    main: ./cmd/agent-tools
+    binary: agent-tools
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - id: default
+    ids:
+      - agent-tools
+    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"

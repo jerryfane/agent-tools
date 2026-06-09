@@ -41,6 +41,7 @@ func newUsageCommand(root *rootOptions) *cobra.Command {
 	cmd.AddCommand(newUsageSessionsCommand(root))
 	cmd.AddCommand(newUsageTUICommand(root))
 	cmd.AddCommand(newUsageHerdrPublisherCommand(root))
+	cmd.AddCommand(newUsageDoctorCommand(root))
 	return cmd
 }
 
