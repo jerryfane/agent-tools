@@ -70,7 +70,7 @@ func TestRunDoctorUsesCCUsageCommandParser(t *testing.T) {
 	cfg.Usage.Providers["codex"] = provider
 
 	checks := runDoctor(cfg)
-	if !hasDoctorCheck(checks, "ccusage command", true) {
+	if !hasDoctorCheck(checks, "codex ccusage", true) {
 		t.Fatalf("expected quoted command check to pass, got %+v", checks)
 	}
 }
@@ -83,12 +83,80 @@ func TestRunDoctorDefaultsEmptyCCUsageCommand(t *testing.T) {
 	provider.Profiles = map[string]config.ProfileConfig{}
 	cfg.Usage.Providers["codex"] = provider
 
-	check := findDoctorCheck(runDoctor(cfg), "ccusage command")
+	check := findDoctorCheck(runDoctor(cfg), "codex ccusage")
 	if check == nil {
-		t.Fatal("expected ccusage command check")
+		t.Fatal("expected codex ccusage check")
 	}
 	if strings.Contains(check.Message, "empty command") {
 		t.Fatalf("expected empty command to fall back to ccusage, got %+v", check)
+	}
+}
+
+func TestRunDoctorReportsConfiguredClaudeProfile(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "claude-home")
+	if err := os.MkdirAll(home, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".credentials.json"), []byte(`{"claudeAiOauth":{"accessToken":"SUPER-SECRET-TOKEN","refreshToken":"r","expiresAt":99999999999999}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.Defaults()
+	provider := cfg.Usage.Providers["claude"]
+	provider.CCUsageEnabled = false
+	provider.Profiles = map[string]config.ProfileConfig{
+		"default": {Home: home, Label: "claude"},
+	}
+	cfg.Usage.Providers["claude"] = provider
+
+	checks := runDoctor(cfg)
+	if !hasDoctorCheck(checks, "claude profiles", true) {
+		t.Fatalf("expected claude profiles check to pass, got %+v", checks)
+	}
+	if !hasDoctorCheck(checks, "claude auth default", true) {
+		t.Fatalf("expected claude auth check to pass, got %+v", checks)
+	}
+	for _, check := range checks {
+		if strings.Contains(check.Message, "SUPER-SECRET-TOKEN") {
+			t.Fatalf("doctor leaked a token value in a message: %+v", check)
+		}
+	}
+}
+
+func TestRunDoctorRejectsInvalidClaudeCreds(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "claude-home")
+	if err := os.MkdirAll(home, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".credentials.json"), []byte(`{"claudeAiOauth":{"refreshToken":"r"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.Defaults()
+	provider := cfg.Usage.Providers["claude"]
+	provider.CCUsageEnabled = false
+	provider.Profiles = map[string]config.ProfileConfig{
+		"default": {Home: home, Label: "claude"},
+	}
+	cfg.Usage.Providers["claude"] = provider
+
+	if !hasDoctorCheck(runDoctor(cfg), "claude auth default", false) {
+		t.Fatalf("expected claude auth check to fail for missing accessToken")
+	}
+}
+
+func TestRunDoctorReportsClaudeDisabled(t *testing.T) {
+	cfg := config.Defaults()
+	provider := cfg.Usage.Providers["claude"]
+	provider.Enabled = false
+	cfg.Usage.Providers["claude"] = provider
+
+	check := findDoctorCheck(runDoctor(cfg), "claude provider")
+	if check == nil || check.Message != "disabled" {
+		t.Fatalf("expected claude provider disabled check, got %+v", check)
+	}
+	if findDoctorCheck(runDoctor(cfg), "claude profiles") != nil {
+		t.Fatalf("expected no claude profiles check when disabled")
 	}
 }
 
