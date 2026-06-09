@@ -19,6 +19,45 @@ func Known() []string {
 	return []string{"claude", "codex"}
 }
 
+// ProfileInfo is a provider-agnostic view of a discovered profile.
+type ProfileInfo struct {
+	Name  string `json:"name"`
+	Home  string `json:"home"`
+	Label string `json:"label,omitempty"`
+}
+
+// ProfilesFor discovers the configured profiles for one provider.
+func ProfilesFor(cfg config.Config, name string) ([]ProfileInfo, error) {
+	switch name {
+	case "codex":
+		found, err := codex.DiscoverProfiles(cfg)
+		if err != nil {
+			return nil, err
+		}
+		return toProfileInfos(len(found), func(i int) ProfileInfo {
+			return ProfileInfo{Name: found[i].Name, Home: found[i].Home, Label: found[i].Label}
+		}), nil
+	case "claude":
+		found, err := claude.DiscoverProfiles(cfg)
+		if err != nil {
+			return nil, err
+		}
+		return toProfileInfos(len(found), func(i int) ProfileInfo {
+			return ProfileInfo{Name: found[i].Name, Home: found[i].Home, Label: found[i].Label}
+		}), nil
+	default:
+		return nil, fmt.Errorf("usage provider %q is not implemented yet", name)
+	}
+}
+
+func toProfileInfos(n int, at func(int) ProfileInfo) []ProfileInfo {
+	out := make([]ProfileInfo, 0, n)
+	for i := 0; i < n; i++ {
+		out = append(out, at(i))
+	}
+	return out
+}
+
 // Enabled returns the configured-and-enabled provider names, preserving the
 // order of Known().
 func Enabled(cfg config.Config) []string {

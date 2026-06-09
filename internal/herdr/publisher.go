@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -14,8 +13,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jerryfane/agent-tools/internal/codex"
 	"github.com/jerryfane/agent-tools/internal/config"
+	"github.com/jerryfane/agent-tools/internal/providers"
 	"github.com/jerryfane/agent-tools/internal/usage"
 )
 
@@ -33,7 +32,10 @@ type PublisherOptions struct {
 	Once       bool
 	DryRun     bool
 	ForceLimit bool
-	Out        io.Writer
+	// Provider optionally restricts publishing to a single provider. Empty
+	// means publish every enabled provider that has matching panes.
+	Provider string
+	Out      io.Writer
 }
 
 type Publisher struct {
@@ -55,6 +57,7 @@ type Pane struct {
 
 type Report struct {
 	PaneID       string            `json:"pane_id"`
+	Provider     string            `json:"provider,omitempty"`
 	Profile      string            `json:"profile"`
 	DisplayAgent string            `json:"display_agent,omitempty"`
 	ClearDisplay bool              `json:"clear_display_agent,omitempty"`
@@ -112,32 +115,64 @@ func (p *Publisher) Run(ctx context.Context) error {
 }
 
 func (p *Publisher) PublishOnce(ctx context.Context) error {
-	profiles, err := codex.DiscoverProfiles(p.cfg)
-	if err != nil {
-		return err
-	}
-	if len(profiles) == 0 {
-		return errors.New("no Codex profiles found")
-	}
 	panes, err := p.listPanes(ctx)
 	if err != nil {
 		return err
 	}
-	procProfiles := discoverPaneProfiles(profiles)
 
-	limits, summary, err := p.collectData(ctx)
-	if err != nil {
-		return err
+	seq := p.now().UnixNano()
+	labelPrefixes := parseLabelPrefixes(os.Getenv("CODEX_USAGE_LABEL_PREFIXES"))
+	force := p.takeForceLimit()
+	var reports []Report
+	var firstCollectErr error
+	// Each provider is collected independently: one provider failing (e.g. a
+	// rate-limited claude endpoint) must not stop another provider's panes from
+	// being published.
+	for _, name := range p.targetProviders() {
+		profiles, err := providers.ProfilesFor(p.cfg, name)
+		if err != nil {
+			firstCollectErr = recordCollectError(p.options.Out, firstCollectErr, name, err)
+			continue
+		}
+		if len(profiles) == 0 {
+			continue
+		}
+		procProfiles := discoverPaneProfiles(name, profiles)
+		// Skip a provider with no matching panes: there is nothing to annotate,
+		// and we must not call its (rate-limited) quota endpoint needlessly.
+		if !providerActive(name, panes, procProfiles) {
+			continue
+		}
+		limits, summary, err := p.collectData(ctx, name, force)
+		if err != nil {
+			firstCollectErr = recordCollectError(p.options.Out, firstCollectErr, name, err)
+			continue
+		}
+		reports = append(reports, BuildReports(panes, profiles, limits, summary, procProfiles, BuildOptions{
+			Provider:       name,
+			Mode:           p.options.Mode,
+			Source:         p.options.Source,
+			TTL:            p.options.Interval * 3,
+			DefaultProfile: p.defaultProfile(name, profiles),
+			LabelPrefixes:  labelPrefixes,
+			Seq:            seq,
+		})...)
 	}
-
-	reports := BuildReports(panes, profiles, limits, summary, procProfiles, BuildOptions{
-		Mode:           p.options.Mode,
-		Source:         p.options.Source,
-		TTL:            p.options.Interval * 3,
-		DefaultProfile: p.defaultProfile(profiles),
-		LabelPrefixes:  parseLabelPrefixes(os.Getenv("CODEX_USAGE_LABEL_PREFIXES")),
-		Seq:            p.now().UnixNano(),
+	sort.Slice(reports, func(i, j int) bool {
+		return reports[i].PaneID < reports[j].PaneID
 	})
+	// Only surface a collection error when no provider produced anything;
+	// otherwise the healthy providers' reports are published and the failure was
+	// already logged.
+	if len(reports) == 0 {
+		if firstCollectErr != nil {
+			return firstCollectErr
+		}
+		if p.options.DryRun {
+			return writeJSON(p.options.Out, reports)
+		}
+		return nil
+	}
 	if p.options.DryRun {
 		return writeJSON(p.options.Out, reports)
 	}
@@ -158,35 +193,63 @@ func (p *Publisher) PublishOnce(ctx context.Context) error {
 	return nil
 }
 
-func (p *Publisher) collectData(ctx context.Context) ([]usage.LimitSnapshot, usage.UsageSummary, error) {
+// recordCollectError logs a per-provider collection failure and keeps the first
+// one so PublishOnce can surface it when no provider produced any reports.
+func recordCollectError(out io.Writer, first error, name string, err error) error {
+	fmt.Fprintf(out, "publisher %s collect error: %v\n", name, err)
+	if first == nil {
+		return err
+	}
+	return first
+}
+
+func (p *Publisher) targetProviders() []string {
+	if p.options.Provider != "" {
+		return []string{p.options.Provider}
+	}
+	return providers.Enabled(p.cfg)
+}
+
+// providerActive reports whether any listed pane is annotated by this provider,
+// either by its agent name or a process-environment profile mapping.
+func providerActive(name string, panes []Pane, procProfiles map[string]string) bool {
+	for _, pane := range panes {
+		if pane.Agent == name || procProfiles[pane.PaneID] != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func (p *Publisher) collectData(ctx context.Context, name string, force bool) ([]usage.LimitSnapshot, usage.UsageSummary, error) {
 	var limits []usage.LimitSnapshot
 	var limitsErr error
 	if p.options.Mode == ModeLimit || p.options.Mode == ModeAuto {
-		limits, limitsErr = codex.NewLimitsClient(p.cfg).Limits(ctx, codex.LimitsOptions{ForceRefresh: p.takeForceLimit()})
+		limits, limitsErr = providers.LimitsFor(ctx, p.cfg, name, force)
 	}
 	var summary usage.UsageSummary
 	var usageErr error
 	if p.options.Mode == ModeUsage || p.options.Mode == ModeAuto {
-		summary, usageErr = codex.NewUsageClient(p.cfg).Usage(ctx, codex.UsageOptions{})
+		summary, usageErr = providers.UsageFor(ctx, p.cfg, name, time.Time{})
 	}
 	switch p.options.Mode {
 	case ModeLimit:
 		if limitsErr != nil {
-			return nil, usage.UsageSummary{}, fmt.Errorf("collect Codex limits: %w", limitsErr)
+			return nil, usage.UsageSummary{}, fmt.Errorf("collect %s limits: %w", name, limitsErr)
 		}
 	case ModeUsage:
 		if usageErr != nil {
-			return nil, usage.UsageSummary{}, fmt.Errorf("collect Codex usage: %w", usageErr)
+			return nil, usage.UsageSummary{}, fmt.Errorf("collect %s usage: %w", name, usageErr)
 		}
 		if summary.Date == "" {
-			return nil, usage.UsageSummary{}, errors.New("collect Codex usage: empty usage summary")
+			return nil, usage.UsageSummary{}, fmt.Errorf("collect %s usage: empty usage summary", name)
 		}
 	case ModeAuto:
 		if limitsErr != nil {
 			if usageErr != nil {
-				return nil, usage.UsageSummary{}, fmt.Errorf("collect Codex limits and usage: limits: %v; usage: %v", limitsErr, usageErr)
+				return nil, usage.UsageSummary{}, fmt.Errorf("collect %s limits and usage: limits: %v; usage: %v", name, limitsErr, usageErr)
 			}
-			return nil, usage.UsageSummary{}, fmt.Errorf("collect Codex limits: %w", limitsErr)
+			return nil, usage.UsageSummary{}, fmt.Errorf("collect %s limits: %w", name, limitsErr)
 		}
 	}
 	return limits, summary, nil
@@ -199,6 +262,7 @@ func (p *Publisher) takeForceLimit() bool {
 }
 
 type BuildOptions struct {
+	Provider       string
 	Mode           string
 	Source         string
 	TTL            time.Duration
@@ -207,7 +271,11 @@ type BuildOptions struct {
 	Seq            int64
 }
 
-func BuildReports(panes []Pane, profiles []codex.ProfileInfo, limits []usage.LimitSnapshot, summary usage.UsageSummary, procProfiles map[string]string, opts BuildOptions) []Report {
+func BuildReports(panes []Pane, profiles []providers.ProfileInfo, limits []usage.LimitSnapshot, summary usage.UsageSummary, procProfiles map[string]string, opts BuildOptions) []Report {
+	provider := opts.Provider
+	if provider == "" {
+		provider = "codex"
+	}
 	profileNames := map[string]bool{}
 	profileLabels := map[string]string{}
 	for _, profile := range profiles {
@@ -221,7 +289,7 @@ func BuildReports(panes []Pane, profiles []codex.ProfileInfo, limits []usage.Lim
 	reports := []Report{}
 	for _, pane := range panes {
 		mapped := procProfiles[pane.PaneID]
-		if pane.Agent != "codex" && mapped == "" {
+		if pane.Agent != provider && mapped == "" {
 			continue
 		}
 		profile := inferProfile(pane, profileNames, opts.DefaultProfile)
@@ -240,17 +308,18 @@ func BuildReports(panes []Pane, profiles []codex.ProfileInfo, limits []usage.Lim
 		}
 		report := Report{
 			PaneID:     pane.PaneID,
+			Provider:   provider,
 			Profile:    profile,
-			AgentGuard: pane.Agent == "codex",
+			AgentGuard: pane.Agent == provider,
 			Labels:     labels,
 			Source:     opts.Source,
 			TTL:        opts.TTL,
 			Seq:        opts.Seq,
 		}
-		if profile == opts.DefaultProfile && pane.Agent == "codex" {
+		if profile == opts.DefaultProfile && pane.Agent == provider {
 			report.ClearDisplay = true
 		} else {
-			report.DisplayAgent = "codex-" + profile
+			report.DisplayAgent = provider + "-" + profile
 		}
 		reports = append(reports, report)
 	}
@@ -279,7 +348,7 @@ func (p *Publisher) report(ctx context.Context, report Report) error {
 		"--source", report.Source,
 	}
 	if report.AgentGuard {
-		args = append(args, "--agent", "codex")
+		args = append(args, "--agent", firstNonEmpty(report.Provider, "codex"))
 	}
 	if report.ClearDisplay {
 		args = append(args, "--clear-display-agent")
@@ -300,8 +369,8 @@ func (p *Publisher) report(ctx context.Context, report Report) error {
 	return nil
 }
 
-func (p *Publisher) defaultProfile(profiles []codex.ProfileInfo) string {
-	configured := p.cfg.Usage.Providers["codex"].DefaultProfile
+func (p *Publisher) defaultProfile(name string, profiles []providers.ProfileInfo) string {
+	configured := p.cfg.Usage.Providers[name].DefaultProfile
 	for _, profile := range profiles {
 		if profile.Name == configured {
 			return configured
@@ -378,7 +447,20 @@ func inferProfile(pane Pane, profileNames map[string]bool, fallback string) stri
 	return fallback
 }
 
-func discoverPaneProfiles(profiles []codex.ProfileInfo) map[string]string {
+// providerEnvKeys returns the process-environment variable names that map a
+// pane to a profile for a given provider: an explicit Herdr profile var and the
+// provider's home/config-dir var.
+func providerEnvKeys(name string) (profileEnv, homeEnv string) {
+	switch name {
+	case "claude":
+		return "HERDR_CLAUDE_PROFILE", "CLAUDE_CONFIG_DIR"
+	default:
+		return "HERDR_CODEX_PROFILE", "CODEX_HOME"
+	}
+}
+
+func discoverPaneProfiles(name string, profiles []providers.ProfileInfo) map[string]string {
+	profileEnv, homeEnv := providerEnvKeys(name)
 	homeToProfile := map[string]string{}
 	profileNames := map[string]bool{}
 	for _, profile := range profiles {
@@ -394,7 +476,7 @@ func discoverPaneProfiles(profiles []codex.ProfileInfo) map[string]string {
 		if !entry.IsDir() || !isPID(entry.Name()) {
 			continue
 		}
-		env, err := readProcEnv(filepath.Join("/proc", entry.Name(), "environ"))
+		env, err := readProcEnv(filepath.Join("/proc", entry.Name(), "environ"), profileEnv, homeEnv)
 		if err != nil {
 			continue
 		}
@@ -402,21 +484,25 @@ func discoverPaneProfiles(profiles []codex.ProfileInfo) map[string]string {
 		if paneID == "" {
 			continue
 		}
-		if profile := env["HERDR_CODEX_PROFILE"]; profileNames[profile] {
+		if profile := env[profileEnv]; profileNames[profile] {
 			out[paneID] = profile
 			continue
 		}
-		if profile := homeToProfile[cleanPath(env["CODEX_HOME"])]; profile != "" {
+		if profile := homeToProfile[cleanPath(env[homeEnv])]; profile != "" {
 			out[paneID] = profile
 		}
 	}
 	return out
 }
 
-func readProcEnv(path string) (map[string]string, error) {
+func readProcEnv(path string, keys ...string) (map[string]string, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
+	}
+	wanted := map[string]bool{"HERDR_PANE_ID": true}
+	for _, key := range keys {
+		wanted[key] = true
 	}
 	out := map[string]string{}
 	for _, item := range bytes.Split(data, []byte{0}) {
@@ -425,7 +511,7 @@ func readProcEnv(path string) (map[string]string, error) {
 			continue
 		}
 		name := string(key)
-		if name == "HERDR_PANE_ID" || name == "HERDR_CODEX_PROFILE" || name == "CODEX_HOME" {
+		if wanted[name] {
 			out[name] = string(value)
 		}
 	}
