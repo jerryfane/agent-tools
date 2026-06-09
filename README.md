@@ -37,6 +37,7 @@ agent-tools usage today --provider codex
 agent-tools usage today --provider codex --json
 agent-tools usage sessions --provider codex
 agent-tools usage sessions --provider codex --json
+agent-tools usage tui --provider codex
 ```
 
 `usage limits` is Codex-only right now. It reads local Codex profile
@@ -52,6 +53,10 @@ These commands read local `~/.codex/sessions` JSONL files to enrich sessions
 with cwd/repo, task type, active state, and last prompt preview. They do not
 split usage by Codex subscription when multiple Codex profiles share the same
 session directory.
+
+`usage tui` opens an interactive terminal dashboard with internal sidebar pages
+for limits, usage, sessions, providers, and alerts. It uses the same Codex
+limits and ccusage-backed session data as the CLI commands.
 
 Profiles can be configured explicitly in `~/.config/agent-tools/config.toml`.
 If no Codex profiles are configured, the tool discovers `~/.codex-*`
