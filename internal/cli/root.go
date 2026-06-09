@@ -6,8 +6,10 @@ import (
 	"strings"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/jerryfane/agent-tools/internal/codex"
 	"github.com/jerryfane/agent-tools/internal/config"
+	usagetui "github.com/jerryfane/agent-tools/internal/tui"
 	"github.com/jerryfane/agent-tools/internal/usage"
 	"github.com/spf13/cobra"
 )
@@ -36,6 +38,7 @@ func newUsageCommand(root *rootOptions) *cobra.Command {
 	cmd.AddCommand(newUsageLimitsCommand(root))
 	cmd.AddCommand(newUsageTodayCommand(root))
 	cmd.AddCommand(newUsageSessionsCommand(root))
+	cmd.AddCommand(newUsageTUICommand(root))
 	return cmd
 }
 
@@ -194,6 +197,34 @@ func newUsageSessionsCommand(root *rootOptions) *cobra.Command {
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "print JSON")
 	cmd.Flags().StringVar(&dateValue, "date", "", "date in YYYY-MM-DD format, default today in configured timezone")
 	cmd.Flags().IntVar(&limit, "limit", 20, "maximum sessions to show, use 0 for all")
+	return cmd
+}
+
+func newUsageTUICommand(root *rootOptions) *cobra.Command {
+	var provider string
+	cmd := &cobra.Command{
+		Use:   "tui",
+		Short: "Open the interactive usage dashboard",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := loadAppConfig(root)
+			if err != nil {
+				return err
+			}
+			if provider == "" {
+				provider = "codex"
+			}
+			if provider != "codex" {
+				return fmt.Errorf("usage tui provider %q is not implemented yet", provider)
+			}
+			if !cfg.Usage.Providers["codex"].Enabled {
+				return fmt.Errorf("codex provider is disabled")
+			}
+			program := tea.NewProgram(usagetui.New(cfg), tea.WithAltScreen(), tea.WithMouseCellMotion())
+			_, err = program.Run()
+			return err
+		},
+	}
+	cmd.Flags().StringVar(&provider, "provider", "codex", "usage provider")
 	return cmd
 }
 
